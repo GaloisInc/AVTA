@@ -1,9 +1,14 @@
+From a fresh Ubuntu:
+
+  $ sudo add-apt-repository ppa:hvr/ghc
+  $ sudo apt-get update
+  $ sudo apt-get install ghc-8.2.2
+
 Build steps:
 
-git submodule update --init --recursive
-
-stack build
+  $ git submodule update --init --recursive
+  $ stack build
 
 Execution:
 
-stack exec atva-demo elf.exe
+  $ stack exec atva-demo elf.exe
