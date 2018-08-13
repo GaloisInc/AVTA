@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 module Main (main) where
 
 import           Control.Lens
@@ -16,6 +17,9 @@ import qualified Data.Vector as V
 import           System.Environment
 import           System.Exit
 import           System.IO
+import           Data.Macaw.CFG.Core 
+--import           Data.Macaw.SCFG
+
 
 warning :: String -> IO ()
 warning msg = do
@@ -56,8 +60,22 @@ readElf path = do
 visitTerminals :: StatementList X86_64 ids -> IO ()
 visitTerminals sl = do
   case stmtsTerm sl of
-    ParsedCall _ Nothing ->
+    ParsedCall _ Nothing -> do
       putStrLn $ "Tail call"
+      
+    ParsedCall s ret -> do
+      case s^.curIP of
+          BVValue _ a ->
+             putStrLn $ "Current IP " ++ show a
+          RelocatableValue repr addr ->
+             putStrLn $ "Current IP : relocatablevalue"
+          SymbolValue _ _ ->
+             putStrLn $ "Current IP  symbolValue"
+          AssignedValue _  ->
+             putStrLn $ "Current IP assignedvalue"
+          _ ->
+             putStrLn $ "Current IP unknown"
+
     ParsedCall _ (Just retAddr) -> do
       putStrLn $ "Call returns to " ++ show retAddr
     ParsedJump _ addr -> do
