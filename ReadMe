@@ -1,0 +1,9 @@
+Build steps:
+
+git submodule update --init --recursive
+
+stack build
+
+Execution:
+
+stack exec atva-demo elf.exe
