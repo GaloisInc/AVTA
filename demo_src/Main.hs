@@ -57,8 +57,8 @@ readElf path = do
         warning "Expected Linux binary"
       pure e
 
-visitTerminals :: StatementList X86_64 ids -> IO ()
-visitTerminals sl = do
+visitTerminals :: StatementList X86_64 ids -> DiscoveryState X86_64 -> IO ()
+visitTerminals sl discInfo = do
   case stmtsTerm sl of
     ParsedCall _ Nothing -> do
       putStrLn $ "Tail call"
@@ -67,8 +67,12 @@ visitTerminals sl = do
       case s^.curIP of
           BVValue _ a ->
              putStrLn $ "Current IP " ++ show a
-          RelocatableValue repr addr ->
-             putStrLn $ "Current IP : relocatablevalue"
+          RelocatableValue repr addr -> do
+            let mem = memory discInfo
+            let name_map = symbolNames discInfo
+            case (asSegmentOff mem addr) of
+                Just seg -> putStrLn $ "Current IP : relocatablevalue " ++ show (Map.lookup seg name_map)
+                Nothing -> putStrLn $ "Current IP: relocatablevalue with undef addr"
           SymbolValue _ _ ->
              putStrLn $ "Current IP  symbolValue"
           AssignedValue _  ->
@@ -86,8 +90,8 @@ visitTerminals sl = do
       putStrLn $ "Return"
     ParsedIte _ x y -> do
       putStrLn $ "Ite"
-      visitTerminals x
-      visitTerminals y
+      visitTerminals x discInfo
+      visitTerminals y discInfo
     ParsedArchTermStmt{} -> do
       putStrLn $ "ArchTermStmt"
     ParsedTranslateError{} -> do
@@ -127,8 +131,9 @@ main = do
   -- Walk through functions
   forM_ (exploredFunctions discInfo) $ \(Some f) -> do
     -- Walk through basic blocks within function
+    putStrLn $ ""
     putStrLn $ "Function " ++ BSC.unpack (discoveredFunName f)
     forM_ (f^.parsedBlocks) $ \b -> do
       putStrLn $ "Block start: " ++ show (pblockAddr b)
       -- Print out information from list
-      visitTerminals (blockStatementList b)
+      visitTerminals (blockStatementList b) discInfo
