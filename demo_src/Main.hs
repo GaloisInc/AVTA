@@ -57,6 +57,16 @@ readElf path = do
         warning "Expected Linux binary"
       pure e
 
+
+show_rhs (EvalApp app) = "EvalApp"
+show_rhs (SetUndefined tr) = "SetUndefined"
+show_rhs (ReadMem f mrep) =  "ReadMem"
+show_rhs (CondReadMem mrep fb f fty) =  "CondReadMem"
+show_rhs (EvalArchFn af trep) =  "EvalArchFn"
+
+
+show_asgn asgn = show_rhs (assignRhs asgn)
+
 visitTerminals :: StatementList X86_64 ids -> DiscoveryState X86_64 -> IO ()
 visitTerminals sl discInfo = do
   case stmtsTerm sl of
@@ -71,12 +81,12 @@ visitTerminals sl discInfo = do
             let mem = memory discInfo
             let name_map = symbolNames discInfo
             case (asSegmentOff mem addr) of
-                Just seg -> putStrLn $ "Current IP : relocatablevalue " ++ show (Map.lookup seg name_map)
-                Nothing -> putStrLn $ "Current IP: relocatablevalue with undef addr"
+                Just seg -> putStrLn $ "Found a call to : (relocatablevalue) " ++ show (Map.lookup seg name_map) ++ " at addr " ++ (show seg)
+                Nothing -> putStrLn $ "Found a call to : (relocatablevalue) with undef addr"
           SymbolValue _ _ ->
-             putStrLn $ "Current IP  symbolValue"
-          AssignedValue _  ->
-             putStrLn $ "Current IP assignedvalue"
+             putStrLn $ "Found a call to: (symbolvalue) "
+          AssignedValue asgn  ->
+             putStrLn $ "Found a call to: (assignedvalue) " ++ (show_asgn asgn)
           _ ->
              putStrLn $ "Current IP unknown"
 
