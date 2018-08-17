@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Main (main) where
 
 import           Control.Lens
@@ -13,11 +14,16 @@ import           Data.Macaw.X86
 import qualified Data.Map.Strict as Map
 import           Data.Maybe
 import           Data.Parameterized.Some
+import           Data.Parameterized.NatRepr
+import qualified Data.Parameterized.Map as PMap
 import qualified Data.Vector as V
 import           System.Environment
 import           System.Exit
 import           System.IO
-import           Data.Macaw.CFG.Core 
+import           Data.Macaw.Types
+import           Data.Macaw.CFG.Core
+import           Data.Macaw.CFG.App
+import qualified Data.Macaw.AbsDomain.AbsState as AS
 --import           Data.Macaw.SCFG
 
 
@@ -57,15 +63,69 @@ readElf path = do
         warning "Expected Linux binary"
       pure e
 
+showApp ::  StatementList X86_64 ids -> App (Value X86_64 ids) (BVType 64) -> DiscoveryState X86_64 -> String
+showApp sl val discInfo =
+  case val of
+    Mux _ c x y ->  "mux" 
+    Trunc x w ->  "trunc" 
+    TupleField _ x i ->  "tuple_field" 
+    SExt x w ->  "sext" 
+    UExt x w ->  "uext"  
+    BVAdd _ x y   ->  "bv_add "   ++ showBVValue sl x discInfo ++ " and " ++ showBVValue sl y discInfo
+    BVAdc _ x y c ->  "bv_adc" 
+    BVSub _ x y ->  "bv_sub"
+    BVSbb _ x y b ->  "bv_sbb" 
+    BVMul _ x y ->  "bv_mul" 
+    BVComplement _ x ->  "bv_complement" 
+    BVAnd _ x y ->  "bv_and " ++ showBVValue sl x discInfo ++ " and " ++ showBVValue sl y discInfo
+    BVOr  _ x y ->  "bv_or"  
+    BVXor _ x y ->  "bv_xor" 
+    BVShl _ x y ->  "bv_shl" 
+    BVShr _ x y ->  "bv_shr" 
+    BVSar _ x y ->  "bv_sar" 
+    PopCount _ x ->  "popcount" 
+    ReverseBytes _ x ->  "reverse_bytes" 
+    Bsf _ x ->  "bsf"
+    Bsr _ x ->  "bsr"
 
-show_rhs (EvalApp app) = "EvalApp"
-show_rhs (SetUndefined tr) = "SetUndefined"
-show_rhs (ReadMem f mrep) =  "ReadMem"
-show_rhs (CondReadMem mrep fb f fty) =  "CondReadMem"
-show_rhs (EvalArchFn af trep) =  "EvalArchFn"
-
-
-show_asgn asgn = show_rhs (assignRhs asgn)
+showBVValue ::  StatementList X86_64 ids -> Value X86_64 ids (BVType 64) -> DiscoveryState X86_64 -> String
+showBVValue sl val discInfo = 
+  case val of
+          BVValue n a ->
+            let mem = memory discInfo in
+            let name_map = symbolNames discInfo in
+--            let glo_map = _globalDataMap discInfo in
+--            let Just addr = (valueAsMemAddr val) in 
+--            show (Map.lookup addr glo_map)
+--                  Just seg -> show (Map.lookup seg name_map) ++ " at addr " ++ (show seg)
+--                  Nothing -> "(bvvalue) undef addr")
+             "(BVValue): "++ show (valueAsMemAddr val) -- absoluteAddr (fromInteger a))
+          RelocatableValue repr addr -> 
+            let mem = memory discInfo in
+            let name_map = symbolNames discInfo in
+            (case (asSegmentOff mem addr) of
+                Just seg -> "(relocatablevalue) " ++ show (Map.lookup seg name_map) ++ " at addr " ++ (show seg)
+                Nothing ->  "(relocatablevalue) with undef addr")
+          SymbolValue _ _ ->
+             "(symbolvalue) "
+          AssignedValue asgn  ->
+             let absState = stmtsAbsState sl in
+             let mAss = view AS.absAssignments absState in
+             "(assignedvalue) with AbsValue: " ++
+             (show $ PMap.lookup (assignId asgn) mAss)
+{-             ++
+            (case (assignRhs asgn) of
+               EvalApp app -> "EvalApp "++ (showApp sl app discInfo)
+               SetUndefined tr -> "SetUndefined"
+               ReadMem f mrep -> "ReadMem " ++ (showBVValue sl f discInfo)
+               CondReadMem mrep fb f fty -> "CondReadMem"
+               EvalArchFn af trep -> "EvalArchFn"
+            ) -}
+          Initial reg ->
+            "Held in register: " ++ (show reg)
+          
+          _ -> 
+             "Unknown BVValue"
 
 visitTerminals :: StatementList X86_64 ids -> DiscoveryState X86_64 -> IO ()
 visitTerminals sl discInfo = do
@@ -73,25 +133,8 @@ visitTerminals sl discInfo = do
     ParsedCall _ Nothing -> do
       putStrLn $ "Tail call"
       
-    ParsedCall s ret -> do
-      case s^.curIP of
-          BVValue _ a ->
-             putStrLn $ "Current IP " ++ show a
-          RelocatableValue repr addr -> do
-            let mem = memory discInfo
-            let name_map = symbolNames discInfo
-            case (asSegmentOff mem addr) of
-                Just seg -> putStrLn $ "Found a call to : (relocatablevalue) " ++ show (Map.lookup seg name_map) ++ " at addr " ++ (show seg)
-                Nothing -> putStrLn $ "Found a call to : (relocatablevalue) with undef addr"
-          SymbolValue _ _ ->
-             putStrLn $ "Found a call to: (symbolvalue) "
-          AssignedValue asgn  ->
-             putStrLn $ "Found a call to: (assignedvalue) " ++ (show_asgn asgn)
-          _ ->
-             putStrLn $ "Current IP unknown"
-
-    ParsedCall _ (Just retAddr) -> do
-      putStrLn $ "Call returns to " ++ show retAddr
+    ParsedCall s ret ->
+      putStrLn $ "Found a call to: "++(showBVValue sl (s^.curIP) discInfo)
     ParsedJump _ addr -> do
       putStrLn $ "Jump to " ++ show addr
     ParsedLookupTable _ _ addrs -> do
@@ -145,5 +188,6 @@ main = do
     putStrLn $ "Function " ++ BSC.unpack (discoveredFunName f)
     forM_ (f^.parsedBlocks) $ \b -> do
       putStrLn $ "Block start: " ++ show (pblockAddr b)
+
       -- Print out information from list
       visitTerminals (blockStatementList b) discInfo
