@@ -90,6 +90,8 @@ showApp sl val discInfo =
     ReverseBytes _ x ->  "reverse_bytes" 
     Bsf _ x ->  "bsf"
     Bsr _ x ->  "bsr" -}
+
+    
 funStringsOfabsValues:: AS.AbsValue 64 _ -> DiscoveryState X86_64 -> [String]
 funStringsOfabsValues val discInfo =
   case val of
@@ -200,7 +202,7 @@ dotFun (hd:tl) =
 main :: IO ()
 main = do
   args <- getArgs
-  putStrLn $ show args
+ -- putStrLn $ show args
   let outName = args !! 0 ++ ".dot"
   progPath <- parseProgPath
   e <- readElf progPath
