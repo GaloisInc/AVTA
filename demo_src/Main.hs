@@ -184,11 +184,26 @@ visitTerminals sl discInfo = do
 --      putStrLn $ "Classify failure"
       return []
 
+
+dotFun :: [(String, [String])] -> [String]
+dotFun [] = error "empty list"
+dotFun [a] = case a of
+             (call,[]) -> [show call]
+             (call,callees) -> map (\x -> "\"" ++ call ++ "\"" ++ " -> " ++  "\"" ++ x ++ "\"") callees
+dotFun (hd:tl) =
+  let head = case hd of
+        (call,[]) -> [show call]
+        (call,callees) -> map (\x ->  "\"" ++ call ++ "\"" ++ " -> " ++  "\"" ++ x ++  "\"") callees in
+  let tail = dotFun tl in
+  concat [head, tail]
+          
+  
+
 main :: IO ()
 main = do
   args <- getArgs
---  putStrLn $ show args
-
+ -- putStrLn $ show args
+  let outName = args !! 0 ++ ".dot"
   progPath <- parseProgPath
   e <- readElf progPath
 
@@ -223,4 +238,13 @@ main = do
                                        -- Print out information from list
                                        visitTerminals (blockStatementList b) discInfo)
                    return (BSC.unpack (discoveredFunName f), nub (concat calledFrom)))
+  
   putStrLn $ show funPack
+  let dotfun = dotFun funPack
+  appendFile outName "digraph G { \n"
+  appendFile outName $ unlines dotfun
+  appendFile outName "}"
+
+
+
+  
