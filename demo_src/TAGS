@@ -1,0 +1,9 @@
+
+Main.hs,186
+module Main Main2,3
+warning warning23,24
+fatalError fatalError27,28
+parseProgPath parseProgPath33,34
+readElf readElf43,44
+visitTerminals visitTerminals59,60
+main main97,98
