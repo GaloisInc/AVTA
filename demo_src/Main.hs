@@ -23,6 +23,9 @@ import           System.Environment
 import           System.Exit
 import           System.IO
 import           Data.Macaw.Types
+import           Data.Macaw.X86.SyscallInfo
+import           Data.Macaw.Analysis.FunctionArgs
+import           Data.Macaw.Architecture.Info (ArchitectureInfo(..))
 import           Data.Macaw.CFG.Core
 import           Data.Macaw.CFG.App
 import qualified Data.Set as Set
@@ -151,8 +154,8 @@ showBVValue sl val discInfo =
           _ -> 
              let s =  "Unknown BVValue" in []
 
-visitTerminals :: StatementList X86_64 ids -> DiscoveryState X86_64 -> IO ([String])
-visitTerminals sl discInfo = do
+visitTerminals :: StatementList X86_64 ids -> DiscoveryState X86_64 -> Map.Map (ArchSegmentOff X86_64) (DemandSet X86Reg) ->  IO ([String])
+visitTerminals sl discInfo funDem = do
   case stmtsTerm sl of
     ParsedCall _ Nothing -> do
 --      putStrLn $ "Tail call"
@@ -171,8 +174,8 @@ visitTerminals sl discInfo = do
       return []
     ParsedIte _ x y -> do
 --      putStrLn $ "Ite"
-      a <- visitTerminals x discInfo
-      b <- visitTerminals y discInfo
+      a <- visitTerminals x discInfo funDem
+      b <- visitTerminals y discInfo funDem
       return $ a++b
     ParsedArchTermStmt{} -> do
 --      putStrLn $ "ArchTermStmt"
@@ -197,6 +200,45 @@ dotFun (hd:tl) =
   let tail = dotFun tl in
   concat [head, tail]
           
+
+
+
+-- | Taken from reopt
+summarizeX86TermStmt :: SyscallPersonality
+                     -> ComputeArchTermStmtEffects X86_64 ids
+summarizeX86TermStmt _ Hlt _ =
+  ArchTermStmtRegEffects { termRegDemands = []
+                         , termRegTransfers = []
+                         }
+summarizeX86TermStmt _ UD2 _ =
+  ArchTermStmtRegEffects { termRegDemands = []
+                         , termRegTransfers = []
+                         }
+summarizeX86TermStmt sysp X86Syscall proc_state = do
+  -- Compute the arguments needed by the function
+  let argRegs
+        | BVValue _ call_no <- proc_state^.boundValue syscall_num_reg
+        , Just (_,_,argtypes) <- Map.lookup (fromIntegral call_no) (spTypeInfo sysp) =
+            take (length argtypes) syscallArgumentRegs
+        | otherwise =
+            syscallArgumentRegs
+  let callRegs = [Some sp_reg] ++ Set.toList x86CalleeSavedRegs
+  ArchTermStmtRegEffects { termRegDemands = Some <$> argRegs
+                         , termRegTransfers = callRegs
+                         }
+
+x86DemandInfo :: SyscallPersonality
+              -> ArchDemandInfo X86_64
+x86DemandInfo sysp =
+  ArchDemandInfo { functionArgRegs = [Some RAX]
+                                     ++ (Some <$> x86ArgumentRegs)
+                                     ++ (Some <$> x86FloatArgumentRegs)
+                 , functionRetRegs = ((Some <$> x86ResultRegs) ++ (Some <$> x86FloatResultRegs))
+                 , calleeSavedRegs = x86CalleeSavedRegs
+                 , computeArchTermStmtEffects = summarizeX86TermStmt sysp
+                 , demandInfoCtx = x86DemandContext
+                 }
+-- | End of reopt
   
 
 main :: IO ()
@@ -224,10 +266,11 @@ main = do
   let addrSymMap = Map.fromList [ (memSymbolStart msym, memSymbolName msym) | msym <- symbols ]
   -- Initial entry point is just entry
   let initEntries = maybeToList entry
+  let archDInfo = x86DemandInfo linux_syscallPersonality
   -- Explore all functions
   let fnPred = \_ -> True
   discInfo <- completeDiscoveryState archInfo disOpt mem initEntries addrSymMap fnPred
-
+  let funDem = functionDemands archDInfo discInfo
   -- Walk through functions
   funPack <- (forM (exploredFunctions discInfo) $ \(Some f) -> do
                    -- Walk through basic blocks within function
@@ -236,7 +279,7 @@ main = do
                    calledFrom <- (forM (f^.parsedBlocks) $ \b -> do
 --                                       putStrLn $ "Block start: " ++ show (pblockAddr b)
                                        -- Print out information from list
-                                       visitTerminals (blockStatementList b) discInfo)
+                                       visitTerminals (blockStatementList b) discInfo funDem)
                    return (BSC.unpack (discoveredFunName f), nub (concat calledFrom)))
   
   putStrLn $ show funPack
