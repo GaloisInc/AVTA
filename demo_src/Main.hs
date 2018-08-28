@@ -85,9 +85,6 @@ funStringsOfabsValues val discInfo =
 --showBVValue ::  StatementList X86_64 ids -> Value X86_64 ids _ -> DiscoveryState X86_64 -> [String]
 showAnyBVValue sl val discInfo =
   case val of
-    BVValue _ _ -> ["bvvalue"]
-    RelocatableValue _ _ -> ["RelocatableValue"]
-    SymbolValue _ _ -> ["SymbolValue"]
     AssignedValue asgn  ->
       let absState = stmtsAbsState sl in
       let mAss = view AS.absAssignments absState in
@@ -96,8 +93,11 @@ showAnyBVValue sl val discInfo =
           Just id ->  (funStringsOfabsValues id discInfo)
           Nothing ->   ["notFound"]
       )
-    Initial _ -> ["Initial"]
-    _ -> ["Other"]
+    _ -> ["Not Implemented"]
+{-    BVValue _ _ -> ["bvvalue"]
+    RelocatableValue _ _ -> ["RelocatableValue"]
+    SymbolValue _ _ -> ["SymbolValue"]
+    Initial _ -> ["Initial"] -}
   
 showBVValue ::  StatementList X86_64 ids -> Value X86_64 ids (BVType 64) -> DiscoveryState X86_64 -> [String]
 showBVValue sl val discInfo = 
@@ -210,7 +210,7 @@ visitTerminals sl discInfo funDem = do
       let regDem = registerDemands (fromJust (head dS))
       let m = regStateMap s
       putStrLn $ show regDem
-      putStrLn $ show (Set.map (\r -> viewSome (\d -> let Just s = (PMap.lookup d m) in showAnyBVValue sl s discInfo) r) regDem)
+      putStrLn $ show (Set.map (\r -> viewSome (\d -> let Just s = (PMap.lookup d m) in (show d, showAnyBVValue sl s discInfo)) r) regDem)
 --      let regVals = Set.map (\r -> mapSome (\d -> PMap.lookup d m) r) regDem
 --      putStrLn $ show regVals
 --      let regDem2 = map (viewSome (\l -> l)) (Set.toList regDem)
