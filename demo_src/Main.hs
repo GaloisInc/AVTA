@@ -68,44 +68,37 @@ readElf path = do
       unless (elfOSABI e `elem` [ELFOSABI_LINUX, ELFOSABI_SYSV]) $ do
         warning "Expected Linux binary"
       pure e
-{-
-showApp ::  StatementList X86_64 ids -> App (Value X86_64 ids) (BVType 64) -> DiscoveryState X86_64 -> String
-showApp sl val discInfo =
-  case val of
-    Mux _ c x y ->  "mux" 
-    Trunc x w ->  "trunc" 
-    TupleField _ x i ->  "tuple_field" 
-    SExt x w ->  "sext" 
-    UExt x w ->  "uext"  
-    BVAdd _ x y   ->  "bv_add "   ++ showBVValue sl x discInfo ++ " and " ++ showBVValue sl y discInfo
-    BVAdc _ x y c ->  "bv_adc" 
-    BVSub _ x y ->  "bv_sub"
-    BVSbb _ x y b ->  "bv_sbb" 
-    BVMul _ x y ->  "bv_mul" 
-    BVComplement _ x ->  "bv_complement" 
-    BVAnd _ x y ->  "bv_and " ++ showBVValue sl x discInfo ++ " and " ++ showBVValue sl y discInfo
-    BVOr  _ x y ->  "bv_or"  
-    BVXor _ x y ->  "bv_xor" 
-    BVShl _ x y ->  "bv_shl" 
-    BVShr _ x y ->  "bv_shr" 
-    BVSar _ x y ->  "bv_sar" 
-    PopCount _ x ->  "popcount" 
-    ReverseBytes _ x ->  "reverse_bytes" 
-    Bsf _ x ->  "bsf"
-    Bsr _ x ->  "bsr" -}
 
     
 funStringsOfabsValues:: AS.AbsValue 64 _ -> DiscoveryState X86_64 -> [String]
 funStringsOfabsValues val discInfo =
   case val of
-    AS.FinSet s -> [] -- TODO
+    AS.FinSet s -> [show s] -- TODO
     AS.CodePointers cp _ -> let lcp = Set.elems cp in
                             let mem = memory discInfo in
                             let name_map = symbolNames discInfo in
                             let o_lf = map (\s -> Map.lookup s name_map) lcp in
                             map BSC.unpack (catMaybes o_lf)
-    _ -> []
+    _ -> [show val]
 
+
+--showBVValue ::  StatementList X86_64 ids -> Value X86_64 ids _ -> DiscoveryState X86_64 -> [String]
+showAnyBVValue sl val discInfo =
+  case val of
+    BVValue _ _ -> ["bvvalue"]
+    RelocatableValue _ _ -> ["RelocatableValue"]
+    SymbolValue _ _ -> ["SymbolValue"]
+    AssignedValue asgn  ->
+      let absState = stmtsAbsState sl in
+      let mAss = view AS.absAssignments absState in
+      let s = "(assignedvalue) with AbsValue: " ++ (show $ PMap.lookup (assignId asgn) mAss) in
+      (case PMap.lookup (assignId asgn) mAss of
+          Just id ->  (funStringsOfabsValues id discInfo)
+          Nothing ->   ["notFound"]
+      )
+    Initial _ -> ["Initial"]
+    _ -> ["Other"]
+  
 showBVValue ::  StatementList X86_64 ids -> Value X86_64 ids (BVType 64) -> DiscoveryState X86_64 -> [String]
 showBVValue sl val discInfo = 
   case val of
@@ -154,6 +147,50 @@ showBVValue sl val discInfo =
           _ -> 
              let s =  "Unknown BVValue" in []
 
+getBVValue_addr::  StatementList X86_64 ids -> Value X86_64 ids (BVType 64) -> DiscoveryState X86_64 -> [MemSegmentOff (ArchAddrWidth X86_64)]
+getBVValue_addr sl val discInfo = 
+  case val of
+          BVValue n a ->
+            let mem = memory discInfo in
+            let name_map = symbolNames discInfo in
+--            let glo_map = _globalDataMap discInfo in
+--            let Just addr = (valueAsMemAddr val) in 
+--            show (Map.lookup addr glo_map)
+--                  Just seg -> show (Map.lookup seg name_map) ++ " at addr " ++ (show seg)
+--                  Nothing -> "(bvvalue) undef addr")
+             let s = "(BVValue): "++ show (valueAsMemAddr val) in -- absoluteAddr (fromInteger a)) in
+                 []
+          RelocatableValue repr addr -> 
+            let mem = memory discInfo in
+            let name_map = symbolNames discInfo in
+            (case (asSegmentOff mem addr) of
+                Just seg ->
+                  [seg]
+                Nothing -> [])
+          SymbolValue _ _ -> 
+             let s = "(symbolvalue)" in []
+          AssignedValue asgn  ->
+             let absState = stmtsAbsState sl in
+             let mAss = view AS.absAssignments absState in
+             let s = "(assignedvalue) with AbsValue: " ++ (show $ PMap.lookup (assignId asgn) mAss) in
+             (case PMap.lookup (assignId asgn) mAss of
+               Just id ->  []
+               Nothing ->   []
+             )
+{-             ++
+            (case (assignRhs asgn) of
+               EvalApp app -> "EvalApp "++ (showApp sl app discInfo)
+               SetUndefined tr -> "SetUndefined"
+               ReadMem f mrep -> "ReadMem " ++ (showBVValue sl f discInfo)
+               CondReadMem mrep fb f fty -> "CondReadMem"
+               EvalArchFn af trep -> "EvalArchFn"
+            ) -}
+          Initial reg ->
+             let s = "Held in register: " ++ (show reg) in []
+          
+          _ -> 
+             let s =  "Unknown BVValue" in []
+
 visitTerminals :: StatementList X86_64 ids -> DiscoveryState X86_64 -> Map.Map (ArchSegmentOff X86_64) (DemandSet X86Reg) ->  IO ([String])
 visitTerminals sl discInfo funDem = do
   case stmtsTerm sl of
@@ -162,7 +199,23 @@ visitTerminals sl discInfo funDem = do
       return []
     ParsedCall s ret -> do
 --      putStrLn $ "Found a call to: "
-      return (showBVValue sl (s^.curIP) discInfo)
+      -- s is the state
+      -- 1) find which function this resolved to
+      let callVal = (s^.curIP)
+      let callees = getBVValue_addr sl (s^.curIP) discInfo
+      -- 2) find the used regs from funDem
+      let dS = map (\c -> Map.lookup c funDem) callees
+--      putStrLn $ show dS
+      -- 3) resolve the regs using s
+      let regDem = registerDemands (fromJust (head dS))
+      let m = regStateMap s
+      putStrLn $ show regDem
+      putStrLn $ show (Set.map (\r -> viewSome (\d -> let Just s = (PMap.lookup d m) in showAnyBVValue sl s discInfo) r) regDem)
+--      let regVals = Set.map (\r -> mapSome (\d -> PMap.lookup d m) r) regDem
+--      putStrLn $ show regVals
+--      let regDem2 = map (viewSome (\l -> l)) (Set.toList regDem)
+--      let regVals = map (\r -> PMap.lookup r (regStateMap s)) regDem2
+      return (showBVValue sl callVal discInfo)
     ParsedJump _ addr -> do
 --      putStrLn $ "Jump to " ++ show addr
       return []
