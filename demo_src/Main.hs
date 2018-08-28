@@ -209,7 +209,6 @@ visitTerminals sl discInfo funDem = do
       -- 3) resolve the regs using s
       let regDem = registerDemands (fromJust (head dS))
       let m = regStateMap s
-      putStrLn $ show regDem
       putStrLn $ show (Set.map (\r -> viewSome (\d -> let Just s = (PMap.lookup d m) in (show d, showAnyBVValue sl s discInfo)) r) regDem)
 --      let regVals = Set.map (\r -> mapSome (\d -> PMap.lookup d m) r) regDem
 --      putStrLn $ show regVals
