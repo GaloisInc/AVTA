@@ -73,7 +73,7 @@ readElf path = do
 funStringsOfabsValues:: AS.AbsValue 64 _ -> DiscoveryState X86_64 -> [String]
 funStringsOfabsValues val discInfo =
   case val of
-    AS.FinSet s -> [show s] -- TODO
+    AS.FinSet s -> Set.toList $ Set.map show s
     AS.CodePointers cp _ -> let lcp = Set.elems cp in
                             let mem = memory discInfo in
                             let name_map = symbolNames discInfo in
@@ -82,7 +82,9 @@ funStringsOfabsValues val discInfo =
     _ -> [show val]
 
 
+
 --showBVValue ::  StatementList X86_64 ids -> Value X86_64 ids _ -> DiscoveryState X86_64 -> [String]
+-- Useful to print values in both regular and float registers
 showAnyBVValue sl val discInfo =
   case val of
     AssignedValue asgn  ->
@@ -93,11 +95,14 @@ showAnyBVValue sl val discInfo =
           Just id ->  (funStringsOfabsValues id discInfo)
           Nothing ->   ["notFound"]
       )
-    _ -> ["Not Implemented"]
-{-    BVValue _ _ -> ["bvvalue"]
+    BVValue n a ->
+      [show a ]
+{-      let mem = memory discInfo in -}  
     RelocatableValue _ _ -> ["RelocatableValue"]
     SymbolValue _ _ -> ["SymbolValue"]
-    Initial _ -> ["Initial"] -}
+    Initial _ -> ["Initial"]
+    _ -> ["Not Implemented"]
+{-     -}
   
 showBVValue ::  StatementList X86_64 ids -> Value X86_64 ids (BVType 64) -> DiscoveryState X86_64 -> [String]
 showBVValue sl val discInfo = 
