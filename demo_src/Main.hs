@@ -97,12 +97,11 @@ showAnyBVValue sl val discInfo =
       )
     BVValue n a ->
       [show a ]
-{-      let mem = memory discInfo in -}  
-    RelocatableValue _ _ -> ["RelocatableValue"]
+    _ -> ["Not Implemented"]
+{-    RelocatableValue _ _ -> ["RelocatableValue"]
     SymbolValue _ _ -> ["SymbolValue"]
     Initial _ -> ["Initial"]
-    _ -> ["Not Implemented"]
-{-     -}
+     -}
   
 showBVValue ::  StatementList X86_64 ids -> Value X86_64 ids (BVType 64) -> DiscoveryState X86_64 -> [String]
 showBVValue sl val discInfo = 
@@ -110,11 +109,6 @@ showBVValue sl val discInfo =
           BVValue n a ->
             let mem = memory discInfo in
             let name_map = symbolNames discInfo in
---            let glo_map = _globalDataMap discInfo in
---            let Just addr = (valueAsMemAddr val) in 
---            show (Map.lookup addr glo_map)
---                  Just seg -> show (Map.lookup seg name_map) ++ " at addr " ++ (show seg)
---                  Nothing -> "(bvvalue) undef addr")
              let s = "(BVValue): "++ show (valueAsMemAddr val) in -- absoluteAddr (fromInteger a)) in
                  []
           RelocatableValue repr addr -> 
@@ -158,11 +152,6 @@ getBVValue_addr sl val discInfo =
           BVValue n a ->
             let mem = memory discInfo in
             let name_map = symbolNames discInfo in
---            let glo_map = _globalDataMap discInfo in
---            let Just addr = (valueAsMemAddr val) in 
---            show (Map.lookup addr glo_map)
---                  Just seg -> show (Map.lookup seg name_map) ++ " at addr " ++ (show seg)
---                  Nothing -> "(bvvalue) undef addr")
              let s = "(BVValue): "++ show (valueAsMemAddr val) in -- absoluteAddr (fromInteger a)) in
                  []
           RelocatableValue repr addr -> 
@@ -215,10 +204,6 @@ visitTerminals sl discInfo funDem = do
       let regDem = registerDemands (fromJust (head dS))
       let m = regStateMap s
       putStrLn $ show (Set.map (\r -> viewSome (\d -> let Just s = (PMap.lookup d m) in (show d, showAnyBVValue sl s discInfo)) r) regDem)
---      let regVals = Set.map (\r -> mapSome (\d -> PMap.lookup d m) r) regDem
---      putStrLn $ show regVals
---      let regDem2 = map (viewSome (\l -> l)) (Set.toList regDem)
---      let regVals = map (\r -> PMap.lookup r (regStateMap s)) regDem2
       return (showBVValue sl callVal discInfo)
     ParsedJump _ addr -> do
 --      putStrLn $ "Jump to " ++ show addr
