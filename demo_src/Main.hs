@@ -23,9 +23,6 @@ import           System.Environment
 import           System.Exit
 import           System.IO
 import           Data.Macaw.Types
-import           Data.Macaw.X86.SyscallInfo
-import           Data.Macaw.Analysis.FunctionArgs
-import           Data.Macaw.Architecture.Info (ArchitectureInfo(..))
 import           Data.Macaw.CFG.Core
 import           Data.Macaw.CFG.App
 import qualified Data.Set as Set
@@ -68,47 +65,55 @@ readElf path = do
       unless (elfOSABI e `elem` [ELFOSABI_LINUX, ELFOSABI_SYSV]) $ do
         warning "Expected Linux binary"
       pure e
+{-
+showApp ::  StatementList X86_64 ids -> App (Value X86_64 ids) (BVType 64) -> DiscoveryState X86_64 -> String
+showApp sl val discInfo =
+  case val of
+    Mux _ c x y ->  "mux" 
+    Trunc x w ->  "trunc" 
+    TupleField _ x i ->  "tuple_field" 
+    SExt x w ->  "sext" 
+    UExt x w ->  "uext"  
+    BVAdd _ x y   ->  "bv_add "   ++ showBVValue sl x discInfo ++ " and " ++ showBVValue sl y discInfo
+    BVAdc _ x y c ->  "bv_adc" 
+    BVSub _ x y ->  "bv_sub"
+    BVSbb _ x y b ->  "bv_sbb" 
+    BVMul _ x y ->  "bv_mul" 
+    BVComplement _ x ->  "bv_complement" 
+    BVAnd _ x y ->  "bv_and " ++ showBVValue sl x discInfo ++ " and " ++ showBVValue sl y discInfo
+    BVOr  _ x y ->  "bv_or"  
+    BVXor _ x y ->  "bv_xor" 
+    BVShl _ x y ->  "bv_shl" 
+    BVShr _ x y ->  "bv_shr" 
+    BVSar _ x y ->  "bv_sar" 
+    PopCount _ x ->  "popcount" 
+    ReverseBytes _ x ->  "reverse_bytes" 
+    Bsf _ x ->  "bsf"
+    Bsr _ x ->  "bsr" -}
 
     
 funStringsOfabsValues:: AS.AbsValue 64 _ -> DiscoveryState X86_64 -> [String]
 funStringsOfabsValues val discInfo =
   case val of
-    AS.FinSet s -> Set.toList $ Set.map show s
+    AS.FinSet s -> [] -- TODO
     AS.CodePointers cp _ -> let lcp = Set.elems cp in
                             let mem = memory discInfo in
                             let name_map = symbolNames discInfo in
                             let o_lf = map (\s -> Map.lookup s name_map) lcp in
                             map BSC.unpack (catMaybes o_lf)
-    _ -> [show val]
+    _ -> []
 
-
-
---showBVValue ::  StatementList X86_64 ids -> Value X86_64 ids _ -> DiscoveryState X86_64 -> [String]
--- Useful to print values in both regular and float registers
-showAnyBVValue sl val discInfo =
-  case val of
-    AssignedValue asgn  ->
-      let absState = stmtsAbsState sl in
-      let mAss = view AS.absAssignments absState in
-      let s = "(assignedvalue) with AbsValue: " ++ (show $ PMap.lookup (assignId asgn) mAss) in
-      (case PMap.lookup (assignId asgn) mAss of
-          Just id ->  (funStringsOfabsValues id discInfo)
-          Nothing ->   ["notFound"]
-      )
-    BVValue n a ->
-      [show a ]
-    _ -> ["Not Implemented"]
-{-    RelocatableValue _ _ -> ["RelocatableValue"]
-    SymbolValue _ _ -> ["SymbolValue"]
-    Initial _ -> ["Initial"]
-     -}
-  
 showBVValue ::  StatementList X86_64 ids -> Value X86_64 ids (BVType 64) -> DiscoveryState X86_64 -> [String]
 showBVValue sl val discInfo = 
   case val of
           BVValue n a ->
             let mem = memory discInfo in
             let name_map = symbolNames discInfo in
+--            let glo_map = _globalDataMap discInfo in
+--            let Just addr = (valueAsMemAddr val) in 
+--            show (Map.lookup addr glo_map)
+--                  Just seg -> show (Map.lookup seg name_map) ++ " at addr " ++ (show seg)
+--                  Nothing -> "(bvvalue) undef addr")
              let s = "(BVValue): "++ show (valueAsMemAddr val) in -- absoluteAddr (fromInteger a)) in
                  []
           RelocatableValue repr addr -> 
@@ -146,65 +151,15 @@ showBVValue sl val discInfo =
           _ -> 
              let s =  "Unknown BVValue" in []
 
-getBVValue_addr::  StatementList X86_64 ids -> Value X86_64 ids (BVType 64) -> DiscoveryState X86_64 -> [MemSegmentOff (ArchAddrWidth X86_64)]
-getBVValue_addr sl val discInfo = 
-  case val of
-          BVValue n a ->
-            let mem = memory discInfo in
-            let name_map = symbolNames discInfo in
-             let s = "(BVValue): "++ show (valueAsMemAddr val) in -- absoluteAddr (fromInteger a)) in
-                 []
-          RelocatableValue repr addr -> 
-            let mem = memory discInfo in
-            let name_map = symbolNames discInfo in
-            (case (asSegmentOff mem addr) of
-                Just seg ->
-                  [seg]
-                Nothing -> [])
-          SymbolValue _ _ -> 
-             let s = "(symbolvalue)" in []
-          AssignedValue asgn  ->
-             let absState = stmtsAbsState sl in
-             let mAss = view AS.absAssignments absState in
-             let s = "(assignedvalue) with AbsValue: " ++ (show $ PMap.lookup (assignId asgn) mAss) in
-             (case PMap.lookup (assignId asgn) mAss of
-               Just id ->  []
-               Nothing ->   []
-             )
-{-             ++
-            (case (assignRhs asgn) of
-               EvalApp app -> "EvalApp "++ (showApp sl app discInfo)
-               SetUndefined tr -> "SetUndefined"
-               ReadMem f mrep -> "ReadMem " ++ (showBVValue sl f discInfo)
-               CondReadMem mrep fb f fty -> "CondReadMem"
-               EvalArchFn af trep -> "EvalArchFn"
-            ) -}
-          Initial reg ->
-             let s = "Held in register: " ++ (show reg) in []
-          
-          _ -> 
-             let s =  "Unknown BVValue" in []
-
-visitTerminals :: StatementList X86_64 ids -> DiscoveryState X86_64 -> Map.Map (ArchSegmentOff X86_64) (DemandSet X86Reg) ->  IO ([String])
-visitTerminals sl discInfo funDem = do
+visitTerminals :: StatementList X86_64 ids -> DiscoveryState X86_64 -> IO ([String])
+visitTerminals sl discInfo = do
   case stmtsTerm sl of
     ParsedCall _ Nothing -> do
 --      putStrLn $ "Tail call"
       return []
     ParsedCall s ret -> do
 --      putStrLn $ "Found a call to: "
-      -- s is the state
-      -- 1) find which function this resolved to
-      let callVal = (s^.curIP)
-      let callees = getBVValue_addr sl (s^.curIP) discInfo
-      -- 2) find the used regs from funDem
-      let dS = map (\c -> Map.lookup c funDem) callees
---      putStrLn $ show dS
-      -- 3) resolve the regs using s
-      let regDem = registerDemands (fromJust (head dS))
-      let m = regStateMap s
-      putStrLn $ show (Set.map (\r -> viewSome (\d -> let Just s = (PMap.lookup d m) in (show d, showAnyBVValue sl s discInfo)) r) regDem)
-      return (showBVValue sl callVal discInfo)
+      return (showBVValue sl (s^.curIP) discInfo)
     ParsedJump _ addr -> do
 --      putStrLn $ "Jump to " ++ show addr
       return []
@@ -216,8 +171,8 @@ visitTerminals sl discInfo funDem = do
       return []
     ParsedIte _ x y -> do
 --      putStrLn $ "Ite"
-      a <- visitTerminals x discInfo funDem
-      b <- visitTerminals y discInfo funDem
+      a <- visitTerminals x discInfo
+      b <- visitTerminals y discInfo
       return $ a++b
     ParsedArchTermStmt{} -> do
 --      putStrLn $ "ArchTermStmt"
@@ -229,7 +184,7 @@ visitTerminals sl discInfo funDem = do
 --      putStrLn $ "Classify failure"
       return []
 
-
+--parse calls into dot format
 dotFun :: [(String, [String])] -> [String]
 dotFun [] = error "empty list"
 dotFun [a] = case a of
@@ -241,53 +196,55 @@ dotFun (hd:tl) =
         (call,callees) -> map (\x ->  "\"" ++ call ++ "\"" ++ " -> " ++  "\"" ++ x ++  "\"") callees in
   let tail = dotFun tl in
   concat [head, tail]
-          
 
+--hard encode calls into boogie format
+boogieFun :: [(String, [String])] -> [String]
+boogieFun [] = error "empty list"
+boogieFun [a] = case a of
+             (call,[]) -> ["procedure " ++ call ++ "()" ++ "\n"
+                          ++ "{" ++ "\n"
+                          ++ "  var v1 : int;"
+                          ++ "\n"++"}" ++ "\n"]
+             (call,callees) -> concat [["procedure " ++ call ++ "()" ++ "\n"
+                          ++ "{" ++ "\n"
+                          ++ "  var v1 : int;"],
+                                       map (\x -> "  call v1 := " ++ x ++ "();") callees,
+                                       ["\n"++"}" ++ "\n"]]
+boogieFun (hd:tl) =
+       let head = case hd of
+              (call,[]) -> ["procedure " ++ call ++ "()" ++ "\n"
+                          ++ "{" ++ "\n"
+                          ++ "  var v1 : int;"
+                          ++ "\n" ++ "}" ++ "\n"]
+              (call,callees) -> let callee = map (\x -> "  call v1 := " ++ x ++ "();") callees in 
+                               concat [["procedure " ++ call ++ "()" ++ "\n" ++ "{" ++ "\n" ++ "  var v1 : int;"],
+                                       callee,
+                                       ["\n" ++ "}" ++ "\n"]] in
+       let tail = boogieFun tl in
+       concat [head, tail]
 
+  
 
--- | Taken from reopt
-summarizeX86TermStmt :: SyscallPersonality
-                     -> ComputeArchTermStmtEffects X86_64 ids
-summarizeX86TermStmt _ Hlt _ =
-  ArchTermStmtRegEffects { termRegDemands = []
-                         , termRegTransfers = []
-                         }
-summarizeX86TermStmt _ UD2 _ =
-  ArchTermStmtRegEffects { termRegDemands = []
-                         , termRegTransfers = []
-                         }
-summarizeX86TermStmt sysp X86Syscall proc_state = do
-  -- Compute the arguments needed by the function
-  let argRegs
-        | BVValue _ call_no <- proc_state^.boundValue syscall_num_reg
-        , Just (_,_,argtypes) <- Map.lookup (fromIntegral call_no) (spTypeInfo sysp) =
-            take (length argtypes) syscallArgumentRegs
-        | otherwise =
-            syscallArgumentRegs
-  let callRegs = [Some sp_reg] ++ Set.toList x86CalleeSavedRegs
-  ArchTermStmtRegEffects { termRegDemands = Some <$> argRegs
-                         , termRegTransfers = callRegs
-                         }
+--filter out all the main reachable calls from the program
+findMain :: [(String, [String])] -> [String] -> [(String, [String])]
+findMain calls keys
+    | calls == [] = []
+    | keys == [] = []
+    | otherwise =
+      let mainDir = concat $ map (\a -> filter (\(k,c) -> a == k) calls) keys in
+      let keySub = concat $ map (\a -> snd a) mainDir in
+      let callsM = calls \\ mainDir in
+      let result = concat [mainDir, findMain callsM keySub] in
+      result
 
-x86DemandInfo :: SyscallPersonality
-              -> ArchDemandInfo X86_64
-x86DemandInfo sysp =
-  ArchDemandInfo { functionArgRegs = [Some RAX]
-                                     ++ (Some <$> x86ArgumentRegs)
-                                     ++ (Some <$> x86FloatArgumentRegs)
-                 , functionRetRegs = ((Some <$> x86ResultRegs) ++ (Some <$> x86FloatResultRegs))
-                 , calleeSavedRegs = x86CalleeSavedRegs
-                 , computeArchTermStmtEffects = summarizeX86TermStmt sysp
-                 , demandInfoCtx = x86DemandContext
-                 }
--- | End of reopt
   
 
 main :: IO ()
 main = do
   args <- getArgs
  -- putStrLn $ show args
-  let outName = args !! 0 ++ ".dot"
+ -- let outName = args !! 0 ++ ".dot"
+  let outName = args !! 0 ++ ".bpl"
   progPath <- parseProgPath
   e <- readElf progPath
 
@@ -308,28 +265,33 @@ main = do
   let addrSymMap = Map.fromList [ (memSymbolStart msym, memSymbolName msym) | msym <- symbols ]
   -- Initial entry point is just entry
   let initEntries = maybeToList entry
-  let archDInfo = x86DemandInfo linux_syscallPersonality
   -- Explore all functions
   let fnPred = \_ -> True
   discInfo <- completeDiscoveryState archInfo disOpt mem initEntries addrSymMap fnPred
-  let funDem = functionDemands archDInfo discInfo
+
   -- Walk through functions
   funPack <- (forM (exploredFunctions discInfo) $ \(Some f) -> do
                    -- Walk through basic blocks within function
---                   putStrLn $ ""
---                   putStrLn $ "Function " ++ BSC.unpack (discoveredFunName f)
+                   putStrLn $ ""
+                   putStrLn $ "Function " ++ BSC.unpack (discoveredFunName f)
                    calledFrom <- (forM (f^.parsedBlocks) $ \b -> do
---                                       putStrLn $ "Block start: " ++ show (pblockAddr b)
+                                       putStrLn $ "Block start: " ++ show (pblockAddr b)
                                        -- Print out information from list
-                                       visitTerminals (blockStatementList b) discInfo funDem)
+                                       visitTerminals (blockStatementList b) discInfo)
                    return (BSC.unpack (discoveredFunName f), nub (concat calledFrom)))
-  
+
   putStrLn $ show funPack
-  let dotfun = dotFun funPack
+  let mainCalls = findMain funPack ["main"]
+  putStrLn $ show mainCalls
+  let boogiefun = boogieFun mainCalls
+  appendFile outName $ unlines boogiefun
+  putStrLn $ show boogiefun
+
+
+
+  {-
+  let dotfun = dotFun mainCalls
   appendFile outName "digraph G { \n"
   appendFile outName $ unlines dotfun
   appendFile outName "}"
-
-
-
-  
+  -}
